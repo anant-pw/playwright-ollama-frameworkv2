@@ -11,14 +11,14 @@ pipeline {
         // ── Target ────────────────────────────────────────────────────────────
         string(
             name:         'TARGET_URLS',
-            defaultValue: 'https://www.saucedemo.com',
+            defaultValue: 'https://www.saucedemo.com,https://reqres.in/',
             description:  'Comma-separated URLs to test (no spaces)'
         )
 
         // ── Autonomy level ────────────────────────────────────────────────────
         choice(
             name:         'AUTONOMY_LEVEL',
-            choices:      ['2', '1', '3'],
+            choices:      ['3', '2', '1'],
             description:  '1=Manual (stories only), 2=Semi-Auto (recommended), 3=Full Auto'
         )
 
@@ -35,12 +35,12 @@ pipeline {
         )
         string(
             name:         'MAX_CRAWL_PAGES',
-            defaultValue: '3',
+            defaultValue: '2',
             description:  'Max pages to crawl per URL'
         )
         string(
             name:         'MAX_CRAWL_DEPTH',
-            defaultValue: '2',
+            defaultValue: '1',
             description:  'Max link depth'
         )
         string(
@@ -52,7 +52,7 @@ pipeline {
         // ── AI / Ollama ───────────────────────────────────────────────────────
         string(
             name:         'OLLAMA_MODEL',
-            defaultValue: 'llama3.2:latest',
+            defaultValue: 'llama3:latest',
             description:  'Ollama model — must match output of: ollama list'
         )
         choice(
@@ -64,19 +64,19 @@ pipeline {
         // ── Login ─────────────────────────────────────────────────────────────
         string(
             name:         'LOGIN_EMAIL',
-            defaultValue: '',
+            defaultValue: 'standard_user',
             description:  'Login email/username (blank if no login needed)'
         )
         password(
             name:         'LOGIN_PASSWORD',
-            defaultValue: '',
+            defaultValue: 'secret_sauce',
             description:  'Login password (stored as Jenkins secret)'
         )
 
         // ── Feature flags ─────────────────────────────────────────────────────
         booleanParam(
             name:         'STORY_ENABLED',
-            defaultValue: false,
+            defaultValue: true,
             description:  'Auto-generate regression stories from discovered TCs'
         )
         booleanParam(
@@ -99,6 +99,11 @@ pipeline {
             defaultValue: true,
             description:  'Cache LLM responses — same page skips Ollama call for 24h'
         )
+        choice(
+            name:         'LOG_LEVEL',
+            choices:      ['INFO', 'QUIET', 'DEBUG'],
+            description:  'Logging verbosity: QUIET=only results, INFO=default, DEBUG=verbose'
+        )
     }
 
     environment {
@@ -119,20 +124,34 @@ pipeline {
         API_TIMEOUT_MS          = "${params.API_TIMEOUT_MS}"
         SELF_HEALING            = "${params.SELF_HEALING}"
         CACHE_ENABLED           = "${params.CACHE_ENABLED}"
+        LOG_LEVEL               = "${params.LOG_LEVEL}"
 
-        // ── Fixed CI values ───────────────────────────────────────────────────
+        // ── Fixed CI values (from config.txt) ─────────────────────────────────
         HEADLESS                = "true"
+        PAGE_TIMEOUT            = "60000"
+        USER_AGENT              = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        VIEWPORT_WIDTH          = "1280"
+        VIEWPORT_HEIGHT         = "800"
+        LOCALE                  = "en-US"
+        TIMEZONE                = "America/New_York"
+        
+        // ── Ollama Configuration ──────────────────────────────────────────────
         OLLAMA_HOST             = "http://localhost:11434"
         OLLAMA_READ_TIMEOUT     = "400"
-        OLLAMA_CONNECT_TIMEOUT  = "10"
-        OLLAMA_RETRIES          = "2"
+        OLLAMA_CONNECT_TIMEOUT  = "5"
+        OLLAMA_RETRIES          = "1"
+        
+        // ── Cache Configuration ───────────────────────────────────────────────
         CACHE_TTL_HOURS         = "24"
-        LOG_LEVEL               = "INFO"
+        
+        // ── Reporting Paths ───────────────────────────────────────────────────
         ALLURE_RESULTS_DIR      = "allure-results"
         ALLURE_REPORT_DIR       = "allure-report"
         BUG_REPORTS_DIR         = "bug_reports"
         SCREENSHOTS_DIR         = "screenshots"
         TC_FILE                 = "generated_test_cases.xlsx"
+        
+        // ── Python Environment ────────────────────────────────────────────────
         PYTHONUNBUFFERED        = "1"
         PYTHONIOENCODING        = "utf-8"
     }
@@ -181,12 +200,24 @@ pipeline {
         stage('Pre-flight') {
             steps {
                 script {
-                    echo "Autonomy level : ${params.AUTONOMY_LEVEL}"
-                    echo "Target URLs    : ${params.TARGET_URLS}"
-                    echo "Parallel agents: ${params.PARALLEL_AGENTS}"
-                    echo "API testing    : ${params.API_TESTING}"
-                    echo "Story gen      : ${params.STORY_ENABLED}"
-                    echo "Ollama model   : ${params.OLLAMA_MODEL}"
+                    echo "========================================"
+                    echo "AI QA Framework Configuration"
+                    echo "========================================"
+                    echo "Autonomy level    : ${params.AUTONOMY_LEVEL} (3=Full Auto)"
+                    echo "Target URLs       : ${params.TARGET_URLS}"
+                    echo "Parallel agents   : ${params.PARALLEL_AGENTS}"
+                    echo "API testing       : ${params.API_TESTING}"
+                    echo "Story generation  : ${params.STORY_ENABLED}"
+                    echo "Ollama model      : ${params.OLLAMA_MODEL}"
+                    echo "Log level         : ${params.LOG_LEVEL}"
+                    echo "Self-healing      : ${params.SELF_HEALING}"
+                    echo "Cache enabled     : ${params.CACHE_ENABLED}"
+                    echo "Stealth mode      : ${params.STEALTH_MODE}"
+                    echo "Browser           : ${env.BROWSER}"
+                    echo "Headless          : ${env.HEADLESS}"
+                    echo "========================================"
+                    
+                    // Check Ollama availability
                     if (isUnix()) {
                         sh 'curl -sf http://localhost:11434/api/tags || echo "WARNING: Ollama not responding"'
                     } else {
@@ -199,8 +230,13 @@ pipeline {
         stage('Run AI Tests') {
             steps {
                 script {
-                    // FIXED: Removed duplicate 'pytest' from the command
-                    def pytest_cmd = 'run_agents.py tests/test_agent_results.py tests/test_api_results.py tests/test_bugs.py tests/test_generated_tcs.py tests/test_user_stories.py --alluredir=allure-results --clean-alluredir -v --tb=short -W ignore::urllib3.exceptions.InsecureRequestWarning'
+                    // Test files to run
+                    def test_files = 'run_agents.py tests/test_agent_results.py tests/test_api_results.py tests/test_bugs.py tests/test_generated_tcs.py tests/test_user_stories.py'
+                    def allure_args = '--alluredir=allure-results --clean-alluredir -v --tb=short'
+                    def warnings = '-W ignore::urllib3.exceptions.InsecureRequestWarning'
+                    
+                    // Build pytest command without duplicate pytest
+                    def pytest_cmd = "${test_files} ${allure_args} ${warnings}"
 
                     if (isUnix()) {
                         sh """
@@ -229,26 +265,41 @@ pipeline {
 
     post {
         always {
-            allure([
-                includeProperties: true,
-                jdk:               '',
-                results:           [[path: 'allure-results']]
-            ])
-            cleanWs(
-                cleanWhenSuccess: false,
-                cleanWhenFailure: false,
-                cleanWhenAborted: true,
-                deleteDirs:        true,
-                patterns: [
-                    [pattern: 'venv/**',      type: 'INCLUDE'],
-                    [pattern: '**/*.pyc',     type: 'INCLUDE'],
-                    [pattern: '.llm_cache/**',type: 'INCLUDE'],
-                    [pattern: '__pycache__',  type: 'INCLUDE']
-                ]
-            )
+            script {
+                // Generate Allure report
+                allure([
+                    includeProperties: true,
+                    jdk:               '',
+                    results:           [[path: 'allure-results']]
+                ])
+                
+                // Clean up workspace
+                cleanWs(
+                    cleanWhenSuccess: false,
+                    cleanWhenFailure: false,
+                    cleanWhenAborted: true,
+                    deleteDirs:        true,
+                    patterns: [
+                        [pattern: 'venv/**',      type: 'INCLUDE'],
+                        [pattern: '**/*.pyc',     type: 'INCLUDE'],
+                        [pattern: '.llm_cache/**',type: 'INCLUDE'],
+                        [pattern: '__pycache__',  type: 'INCLUDE']
+                    ]
+                )
+            }
         }
-        success  { echo "All tests PASSED — Allure report published" }
-        failure  { echo "Tests FAILED — check Allure report (FAIL often means bugs found — that is correct)" }
-        unstable { echo "Tests UNSTABLE — partial failures, check report" }
+        success { 
+            echo "✅ All tests PASSED — Allure report published"
+            echo "📊 Report available at: ${env.JOB_URL}/${env.BUILD_NUMBER}/allure"
+        }
+        failure { 
+            echo "❌ Tests FAILED — check Allure report"
+            echo "🔍 FAIL often means bugs were found — that is the expected behavior!"
+            echo "📊 Report available at: ${env.JOB_URL}/${env.BUILD_NUMBER}/allure"
+        }
+        unstable { 
+            echo "⚠️ Tests UNSTABLE — partial failures, check report"
+            echo "📊 Report available at: ${env.JOB_URL}/${env.BUILD_NUMBER}/allure"
+        }
     }
 }
