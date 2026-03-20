@@ -7,6 +7,14 @@ pipeline {
     agent any
 
     parameters {
+	
+	        // Add this parameter at the beginning of your parameters block
+        booleanParam(
+            name: 'REBUILD_LAST',
+            defaultValue: false,
+            description: 'Check to rebuild with same parameters as last successful build'
+        )
+        
 
         // ── Target ────────────────────────────────────────────────────────────
         string(
