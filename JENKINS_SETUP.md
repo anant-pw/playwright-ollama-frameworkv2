@@ -1,29 +1,30 @@
-# Jenkins Integration — Step by Step
+# Jenkins Setup Guide — AI QA Framework v2
 
-## Prerequisites checklist
+## Prerequisites
 
-Before starting, confirm you have:
-- [ ] Jenkins installed and running (http://localhost:8080 or your server)
-- [ ] Python 3.9+ installed on the Jenkins machine
-- [ ] Git installed on the Jenkins machine
+Before starting, confirm:
+- [ ] Jenkins installed and running (`http://localhost:8080` or your server)
+- [ ] Python 3.10+ installed on the Jenkins machine
+- [ ] Git installed
 - [ ] Ollama running as a service (`ollama serve`)
-- [ ] Your project in a Git repo (GitHub / GitLab / Bitbucket / local)
+- [ ] `llama3.2:latest` pulled: `ollama pull llama3.2`
+- [ ] Project in a Git repo
 
 ---
 
 ## Step 1 — Install Jenkins plugins
 
-Go to **Jenkins → Manage Jenkins → Plugins → Available plugins**
-Search and install these (tick all, then Install):
+**Jenkins → Manage Jenkins → Plugins → Available plugins**
+
+Install these:
 
 | Plugin | Why |
 |--------|-----|
-| **Allure Jenkins Plugin** | Publishes Allure HTML report on each build page |
+| **Allure Jenkins Plugin** | Publishes Allure HTML report on each build |
 | **Pipeline** | Enables Jenkinsfile pipeline jobs |
 | **Git** | Clones your repo |
 | **Workspace Cleanup** | Cleans temp files after build |
 | **Timestamper** | Adds timestamps to console output |
-| **Email Extension** | Sends pass/fail emails (optional) |
 
 Restart Jenkins after installing.
 
@@ -31,200 +32,200 @@ Restart Jenkins after installing.
 
 ## Step 2 — Configure Allure plugin
 
-Go to **Jenkins → Manage Jenkins → Tools**
+**Jenkins → Manage Jenkins → Tools → Allure Commandline**
 
-Scroll to **Allure Commandline** section:
 1. Click **Add Allure Commandline**
 2. Name: `allure`
 3. Tick **Install automatically**
-4. Version: pick latest (2.27.0+)
-5. Click **Save**
-
-> This is what the `allure([...])` step in the Jenkinsfile uses.
-> If you already have Allure CLI installed, you can point to that instead.
+4. Version: latest (2.27.0+)
+5. Save
 
 ---
 
-## Step 3 — Push your project to Git
-
-If not already in Git:
-```bash
-cd D:\ai_tester_project
-git init
-git add .
-git commit -m "Initial commit — AI test framework"
-```
-
-For a remote repo (GitHub example):
-```bash
-git remote add origin https://github.com/YOUR_USERNAME/ai-test-framework.git
-git push -u origin main
-```
-
-> If you want to run locally without a remote repo, skip the push —
-> Jenkins can use a local folder path as the repo (see Step 4b).
-
----
-
-## Step 4 — Create the Jenkins Pipeline job
-
-### Option A — From a Git repo (recommended)
+## Step 3 — Create the Pipeline job
 
 1. Jenkins home → **New Item**
-2. Name: `AI-Test-Framework`
+2. Name: `AI-QA-Framework`
 3. Select **Pipeline** → OK
-4. In the job config:
-   - **General** → tick `This project is parameterized` (parameters are already in the Jenkinsfile)
-   - **Build Triggers** → tick `Poll SCM`, schedule: `H 9 * * 1-5` (runs at 9am Mon–Fri)
-   - **Pipeline** section:
-     - Definition: **Pipeline script from SCM**
-     - SCM: **Git**
-     - Repository URL: `https://github.com/YOUR_USERNAME/ai-test-framework.git`
-     - Branch: `*/main`
-     - Script Path: `Jenkinsfile`
-5. Click **Save**
-
-### Option B — Local folder (no Git remote needed)
-
-Same as above but:
-- SCM: **Git**
-- Repository URL: `file:///D:/ai_tester_project`
-- This uses your local folder directly
-
-### Option C — Paste script directly
-
-1. Pipeline section → Definition: **Pipeline script**
-2. Paste the contents of `Jenkinsfile` directly
-3. Click Save
-> Note: with this option you must manually update the script when code changes.
+4. Job config:
+   - **Build Triggers** → Poll SCM: `H 9 * * 1-5` (9am Mon–Fri)
+   - **Pipeline** → Definition: **Pipeline script from SCM**
+   - SCM: **Git** → your repo URL
+   - Branch: `*/main`
+   - Script Path: `Jenkinsfile`
+5. Save
 
 ---
 
-## Step 5 — Configure Ollama to run as a Windows Service
+## Step 4 — Configure Ollama as a Windows Service
 
-Jenkins runs in the background — Ollama needs to be running when Jenkins
-triggers a build at 9am, even if nobody is logged in.
+Jenkins runs in the background — Ollama must start automatically.
 
-### Windows — run Ollama as a service with NSSM
-
-1. Download NSSM from https://nssm.cc/download
-2. Open Command Prompt as Administrator:
 ```cmd
+# Download NSSM from https://nssm.cc/download
+# Then run as Administrator:
+
 nssm install OllamaService "C:\Users\YOUR_USER\AppData\Local\Programs\Ollama\ollama.exe"
 nssm set OllamaService AppParameters "serve"
 nssm set OllamaService Start SERVICE_AUTO_START
 nssm start OllamaService
+
+# Verify:
+curl http://localhost:11434/api/tags
 ```
-3. Verify: `curl http://localhost:11434/api/tags`
-
-> After this, Ollama starts automatically with Windows — no manual start needed.
 
 ---
 
-## Step 6 — Configure the Jenkins agent (Windows-specific)
+## Step 5 — Run Jenkins under your user account
 
-Jenkins by default runs as the SYSTEM account which can't access your user's
-Python venv or Ollama. Fix this:
+Jenkins runs as SYSTEM by default — it can't access your Python venv.
 
-1. **Jenkins → Manage Jenkins → Security → Agents**
-2. If using the built-in node:
-   - Go to **Manage Jenkins → Nodes → Built-In Node → Configure**
-   - Set **# of executors** to 1 (Ollama is single-threaded)
-3. Run Jenkins under your user account:
-   - Open **Services** (services.msc)
-   - Find **Jenkins**
-   - Right-click → Properties → Log On tab
-   - Switch from "Local System" to "This account"
-   - Enter your Windows username and password
-   - Restart Jenkins service
+1. Open **Services** (`services.msc`)
+2. Find **Jenkins** → Properties → Log On tab
+3. Switch to **This account** → enter your Windows username + password
+4. Restart Jenkins
 
 ---
 
-## Step 7 — First build
+## Step 6 — First build
 
-1. Go to your `AI-Test-Framework` job
-2. Click **Build with Parameters**
-3. Set:
-   - TARGET_URLS: `https://example.com`
-   - BROWSER: `chromium`
-   - MAX_STEPS: `2` (use 2 for the first test run — faster)
-   - OLLAMA_MODEL: `llama3`
-4. Click **Build**
-5. Click the build number → **Console Output** to watch live
+1. Job → **Build with Parameters**
+2. Recommended first run settings:
 
----
+| Parameter | Value |
+|-----------|-------|
+| TARGET_URLS | `https://www.saucedemo.com` |
+| AUTONOMY_LEVEL | `2` |
+| MAX_STEPS | `3` |
+| MAX_CRAWL_PAGES | `3` |
+| PARALLEL_AGENTS | `1` |
+| OLLAMA_MODEL | `llama3.2:latest` |
+| API_TESTING | ✅ checked |
+| STORY_ENABLED | unchecked |
 
-## Step 8 — View the Allure report in Jenkins
-
-After the build completes:
-- Build page → **Allure Report** link (appears automatically after first run)
-- Or: `http://YOUR_JENKINS/job/AI-Test-Framework/LAST_BUILD_NUMBER/allure`
-
-The report shows:
-- Overview: pass/fail donut
-- Behaviors: TCs grouped by Feature/Story
-- Suites: every TC and bug as individual test cases
-- Categories: bugs grouped by severity
-- Environment: browser, URL, model used
+3. Click **Build**
+4. Click build number → **Console Output** to watch live
 
 ---
 
-## Step 9 — Schedule automatic runs
+## Step 7 — View Allure report
 
-In the job config → **Build Triggers**:
+After build completes:
+- Build page → **Allure Report** link
+- Or: `http://YOUR_JENKINS/job/AI-QA-Framework/lastBuild/allure`
 
-| Schedule | Cron |
-|----------|------|
-| Every day at 9am | `H 9 * * *` |
-| Mon–Fri at 9am | `H 9 * * 1-5` |
-| Every 6 hours | `H */6 * * *` |
-| On every Git push | tick `GitHub hook trigger` or `GitLab webhook` |
+Report shows:
+- **Overview** — pass/fail summary, bug count, TC count
+- **🤖 Agent Run Results** — per-agent: bugs found, TCs generated, duration
+- **🔌 API Test Results** — per-agent: API endpoints tested, security issues
+- **🐛 Bugs Detected** — each bug as its own card with screenshot
+- **🧪 AI Generated Test Cases** — all TCs with Excel download
+- **🔄 Regression Stories** — auto-generated story execution results (if enabled)
+- **Categories** — bugs grouped by severity (🔴 Critical → 🟢 Low)
+- **Environment** — URL, model, autonomy level, browser used
+
+---
+
+## Jenkins Build Parameters Reference
+
+All parameters map directly to `config.env` settings.
+CLI overrides take effect immediately — no file editing needed.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `TARGET_URLS` | saucedemo.com | Comma-separated URLs, no spaces |
+| `AUTONOMY_LEVEL` | `2` | 1=Manual, 2=Semi-Auto, 3=Full Auto |
+| `BROWSER` | `chromium` | chromium / firefox / webkit |
+| `MAX_STEPS` | `3` | AI actions per page |
+| `MAX_CRAWL_PAGES` | `3` | Pages per URL |
+| `MAX_CRAWL_DEPTH` | `2` | Link follow depth |
+| `PARALLEL_AGENTS` | `1` | URLs tested simultaneously |
+| `OLLAMA_MODEL` | `llama3.2:latest` | Must match `ollama list` output |
+| `STEALTH_MODE` | `true` | Bypass bot detection (keep true) |
+| `LOGIN_EMAIL` | *(empty)* | Leave blank if no login needed |
+| `LOGIN_PASSWORD` | *(empty)* | Stored as Jenkins secret |
+| `STORY_ENABLED` | `false` | Auto-generate regression stories |
+| `API_TESTING` | `true` | Test captured API endpoints |
+| `API_TIMEOUT_MS` | `3000` | API response budget in ms |
+| `SELF_HEALING` | `true` | true=exploratory, false=strict |
+| `CACHE_ENABLED` | `true` | Cache LLM responses 24h |
+
+---
+
+## Autonomy Level Guide for CI
+
+| Level | Use case | LLM calls | Run time |
+|-------|----------|-----------|----------|
+| `1` — Manual | Daily regression on stable sites | 0 (no AI) | Fast (~2 min) |
+| `2` — Semi-Auto | Daily smoke + exploration | ~35 per URL | Medium (~6–10 min) |
+| `3` — Full Auto | Weekly full exploration | ~60+ per URL | Slow (~15–20 min) |
+
+**Recommended CI schedule:**
+```
+Daily (9am):    AUTONOMY_LEVEL=2, MAX_STEPS=3, MAX_CRAWL_PAGES=3
+Weekly (Mon):   AUTONOMY_LEVEL=3, MAX_STEPS=5, MAX_CRAWL_PAGES=5, STORY_ENABLED=true
+```
+
+---
+
+## Understanding Build Results
+
+A **FAILED** build does not mean the framework crashed.
+It usually means the agent found bugs — which is the point.
+
+| Build result | Meaning |
+|-------------|---------|
+| ✅ PASSED | No bugs detected, all TCs generated, API clean |
+| ❌ FAILED | Bugs were found (check Allure — this is correct behaviour) |
+| ⚠️ UNSTABLE | Partial failures — some agents passed, some failed |
+| 💥 ERROR | Framework crash — check console output |
+
+---
+
+## Memory Guide for Parallel Agents
+
+| `PARALLEL_AGENTS` | RAM needed | Notes |
+|------------------|-----------|-------|
+| 1 | ~2.2 GB | Safe on any machine |
+| 2 | ~3.0 GB | Safe on 16GB |
+| 3 | ~3.8 GB | Test carefully on 16GB |
+| 4+ | ~5+ GB | 32GB+ recommended |
+
+Jenkins agent should have `# of executors = 1` — Ollama is single-threaded,
+so multiple concurrent builds don't help and will cause timeouts.
 
 ---
 
 ## Troubleshooting
 
-**"venv not found" / pip errors**
-→ Make sure Python is in PATH for the Jenkins user account:
-```
-System Properties → Environment Variables → Path → Add Python install dir
-```
+**`venv not found` / pip errors**
+→ Add Python to PATH for the Jenkins user account
 
-**"playwright not found" / browser launch fails**
-→ Run in Jenkins console:
+**`playwright not found` / browser launch fails**
+→ Run in Jenkins build step:
 ```bat
 call venv\Scripts\activate.bat && playwright install chromium
 ```
 
-**"Ollama unavailable" in build**
-→ Check OllamaService is running: `sc query OllamaService`
+**`Ollama unavailable` in build**
+→ Check service: `sc query OllamaService`
 → Test: `curl http://localhost:11434/api/tags`
 
-**"allure: command not found"**
-→ Allure plugin auto-installs it — check Jenkins → Tools → Allure Commandline
-→ Or install manually and add to PATH
+**`Model 'llama3.2' not found`**
+→ Run: `ollama pull llama3.2` then restart OllamaService
 
-**Allure report shows but is empty**
-→ `allure-results/` must exist and have `.json` files before `allure([...])` runs
-→ Check the "Archive Artifacts" stage output for `allure-results`
+**Allure report empty**
+→ `allure-results/` must contain `.json` files
+→ Check Archive Artifacts stage for the directory
 
-**Build passes but no report link**
-→ Must have Allure Jenkins Plugin installed AND configured in Tools (Step 2)
+**Build result always FAILED even on clean sites**
+→ Check if API testing is flagging security header bugs
+→ Set `API_TESTING=false` to isolate
 
----
+**SSL warnings flooding console**
+→ Already suppressed with `-W ignore::urllib3.exceptions.InsecureRequestWarning`
+→ If still showing, add `PYTHONWARNINGS=ignore` to environment block
 
-## Environment variables you can override per-build
-
-All values in `config.env` can be overridden as Jenkins parameters:
-
-```
-TARGET_URLS            → which site to test
-BROWSER                → chromium / firefox / webkit  
-MAX_STEPS              → depth of exploration
-OLLAMA_MODEL           → which AI model
-HEADLESS               → always true in CI (set in Jenkinsfile)
-OLLAMA_READ_TIMEOUT    → increase if model is slow
-```
-
-These are passed as environment variables from the Jenkinsfile and
-`config.py` picks them up automatically — no code changes needed.
+**Config prints twice in console output**
+→ Remove last line of `config.py`: `print("\n" + CFG.summary() + "\n")`
+→ The framework now prints config once in `run_smart.py`
