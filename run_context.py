@@ -11,6 +11,7 @@ import os
 import datetime
 from config import CFG
 import logging
+import sys
 
 # e.g. "20260316_171950"
 RUN_ID = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -36,17 +37,29 @@ print(f"[RUN] TCs       → {TC_RUN_FILE}")
 print(f"[RUN] Bugs      → {BUG_RUN_DIR}/")
 print(f"[RUN] Screenshots → {SCREENSHOT_RUN_DIR}/")
 
-# Log file for this run — captures everything printed to console
+# Per-run log file — captures all print() output
 LOG_RUN_FILE = os.path.join(BUG_RUN_DIR, f"run_{RUN_ID}.log")
 
-logging.basicConfig(
-    level    = logging.INFO,
-    format   = "%(asctime)s %(message)s",
-    datefmt  = "%H:%M:%S",
-    handlers = [
-        logging.FileHandler(LOG_RUN_FILE, encoding="utf-8"),
-        logging.StreamHandler(),   # still prints to console too
-    ]
-)
+class _Tee:
+    """Writes to both console and log file simultaneously."""
+    def __init__(self, *targets):
+        self.targets = targets
+    def write(self, msg):
+        for t in self.targets:
+            try:
+                t.write(msg)
+                t.flush()
+            except Exception:
+                pass
+    def flush(self):
+        for t in self.targets:
+            try: t.flush()
+            except Exception: pass
+    def isatty(self):
+        return False
+
+_log_file_handle = open(LOG_RUN_FILE, "w", encoding="utf-8", buffering=1)
+sys.stdout = _Tee(sys.__stdout__, _log_file_handle)
+sys.stderr = _Tee(sys.__stderr__, _log_file_handle)
 
 print(f"[RUN] Log      → {LOG_RUN_FILE}")
