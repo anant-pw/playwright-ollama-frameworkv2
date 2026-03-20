@@ -207,7 +207,7 @@ pipeline {
                             ${pytest_cmd}
                         """
                     } else {
-                        bat "venv\\\\Scripts\\\\pytest.exe ${pytest_cmd} > pytest_output.txt 2>&1"
+                        bat "venv\\\\Scripts\\\\python.exe -m pytest ${pytest_cmd} > pytest_output.txt 2>&1"
                         bat 'type pytest_output.txt'
                     }
                 }
