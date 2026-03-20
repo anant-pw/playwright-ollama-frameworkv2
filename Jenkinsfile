@@ -199,12 +199,13 @@ pipeline {
         stage('Run AI Tests') {
             steps {
                 script {
-                    def pytest_cmd = 'pytest run_agents.py tests/test_agent_results.py tests/test_api_results.py tests/test_bugs.py tests/test_generated_tcs.py tests/test_user_stories.py --alluredir=allure-results --clean-alluredir -v --tb=short -W ignore::urllib3.exceptions.InsecureRequestWarning'
+                    // FIXED: Removed duplicate 'pytest' from the command
+                    def pytest_cmd = 'run_agents.py tests/test_agent_results.py tests/test_api_results.py tests/test_bugs.py tests/test_generated_tcs.py tests/test_user_stories.py --alluredir=allure-results --clean-alluredir -v --tb=short -W ignore::urllib3.exceptions.InsecureRequestWarning'
 
                     if (isUnix()) {
                         sh """
                             . venv/bin/activate
-                            ${pytest_cmd}
+                            pytest ${pytest_cmd}
                         """
                     } else {
                         bat "venv\\\\Scripts\\\\python.exe -m pytest ${pytest_cmd} > pytest_output.txt 2>&1"
